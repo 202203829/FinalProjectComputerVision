@@ -53,24 +53,90 @@ def canny_edge_detector(img: np.array, sobel_filter: np.array, gauss_sigma: floa
         
     return canny_edges_img
 
+def detect_shapes_and_color(img, canny_sigma, sobel_filter, shape_name, target_color, min_area=1000):
+    """
+    Detects specific shapes with a given color in the input image.
+
+    Args:
+        img (np.array): The input image.
+        canny_sigma (float): The sigma value for the Canny edge detection.
+        sobel_filter (np.array): The Sobel filter to use for edge detection.
+        shape_name (str): The name of the shape to detect.
+        target_color (str): The desired color in BGR format ("Yellow", "Red", "Green").
+        min_area (int, optional): Minimum area for contours to consider. Defaults to 1000.
+
+    Returns:
+        bool: True if the specified shape with the target color is detected, False otherwise.
+    """
+    canny_edges = canny_edge_detector(img, sobel_filter, canny_sigma)
+
+    contours, _ = cv2.findContours((canny_edges * 255).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    for contour in contours:
+        # Filter small contours
+        if cv2.contourArea(contour) < min_area:
+            continue
+        
+        # Approximate the shape
+        epsilon = 0.02 * cv2.arcLength(contour, True)
+        approx = cv2.approxPolyDP(contour, epsilon, True)
+        
+        # Classify the shape
+        detected_shape = classify_shape(approx)
+        
+        # If the shape doesn't match the target, skip it
+        if detected_shape != shape_name:
+            continue
+
+        # Create a mask for the contour to calculate the mean color
+        mask = np.zeros_like(img[:, :, 0])
+        cv2.drawContours(mask, [contour], -1, 255, -1)
+        mean_color = cv2.mean(img, mask=mask)[:3]
+
+        # Convert mean BGR color to HSV for color checking
+        mean_color_hsv = cv2.cvtColor(np.uint8([[mean_color]]), cv2.COLOR_BGR2HSV)[0][0]
+
+        # Define HSV ranges for the target color
+        color_ranges = {
+            "Yellow": [(20, 100, 100), (30, 255, 255)],
+            "Red": [(0, 100, 100), (10, 255, 255), (160, 100, 100), (179, 255, 255)],
+            "Green": [(40, 50, 50), (90, 255, 255)],
+        }
+
+        # Check if the color is in the target range
+        if is_color_in_range(mean_color_hsv, color_ranges.get(target_color, [])):
+            return True
+
+    return False
+
+def is_color_in_range(color_hsv, ranges):
+    """Checks if an HSV color falls within specified ranges."""
+    if len(ranges) > 2:  # For colors like red with two ranges
+        return (cv2.inRange(np.uint8([[color_hsv]]), np.array(ranges[0]), np.array(ranges[1]))[0][0] or
+                cv2.inRange(np.uint8([[color_hsv]]), np.array(ranges[2]), np.array(ranges[3]))[0][0])
+    return cv2.inRange(np.uint8([[color_hsv]]), np.array(ranges[0]), np.array(ranges[1]))[0][0]
 
 def classify_shape(approx):
-    # Clasifica la figura según la cantidad de vértices
-    num_vertices = len(approx)
-    if num_vertices == 3:
+    """Classifies a shape based on the number of vertices in the contour."""
+    vertices = len(approx)
+    if vertices == 3:
         return "Triangle"
-    elif num_vertices == 4:
-        # Detecta si es un cuadrado o un rectángulo
-        x, y, w, h = cv2.boundingRect(approx)
-        aspect_ratio = float(w) / h
-        if 0.95 < aspect_ratio < 1.05:
-            return "Square"
-        else:
-            return "Rectangle"
-    elif num_vertices == 5:
-        return "Pentagon"
-    elif num_vertices ==10:
+    elif vertices == 4:
+        return "Square"
+    elif vertices >= 10: 
         return "Star"
+    else:
+        return "Unknown"
+
+def classify_color(mean_color):
+    blue, green, red = mean_color
+
+    if red > 150 and green < 100 and blue < 100:
+        return "Red"
+    elif green > 150 and red < 100 and blue < 100:
+        return "Green"
+    elif red > 150 and green > 150 and blue < 100:
+        return "Yellow"
     else:
         return "Unknown"
 
@@ -79,7 +145,7 @@ def detect_shapes(img: np.array, canny_sigma: float, sobel_filter: np.array, min
     
     contours, _ = cv2.findContours((canny_edges * 255).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
-    detected_shapes = img.copy()  # Fondo original de la imagen
+    detected_shapes = []
     
     for contour in contours:
         # Filtrar contornos pequeños (evita ruido)
@@ -92,47 +158,102 @@ def detect_shapes(img: np.array, canny_sigma: float, sobel_filter: np.array, min
         shape_name = classify_shape(approx)
         
         # Calcula el color promedio dentro del contorno
-        mask = np.zeros_like(img[:,:,0])  # Máscara para el contorno actual
+        mask = np.zeros_like(img[:, :, 0])  # Máscara para el contorno actual
         cv2.drawContours(mask, [contour], -1, 255, -1)  # Dibuja el contorno en blanco sobre la máscara negra
         mean_color = cv2.mean(img, mask=mask)[:3]  # Promedio del color BGR
         
-        # Convierte el color a formato de texto legible
-        color_name = f"BGR({int(mean_color[0])}, {int(mean_color[1])}, {int(mean_color[2])})"
+        # Clasificar el color basado en rangos
+        color_name = classify_color(mean_color)
         
-        # Dibuja la forma detectada en la imagen original
-        cv2.drawContours(detected_shapes, [approx], 0, (0, 255, 0), 2)
-        
-        if shape_name != "Unknown":
-            print(f"Detected: {shape_name}, Color: {color_name}")
+        if shape_name != "Unknown" and color_name != "Unknown":
+            detected_shapes.append((shape_name, color_name))
     
     return detected_shapes
 
+def detect_wrong_shape(frame, gauss_sigma, sobel_filter, expected_shape, expected_color):
+    # Detecta todas las formas y colores presentes en el frame
+    detected_shapes = detect_shapes(frame, gauss_sigma, sobel_filter)
+    
+    for shape, color in detected_shapes:
+        if (shape, color) != (expected_shape, expected_color):
+            return True  # Figura incorrecta encontrada
+
+    return False  # No se encontraron figuras incorrectas
+
 
 def main():
-    cap = cv2.VideoCapture(0)  # Accede a la cámara por defecto
-    
-    # Filtro Sobel utilizado para la detección de bordes
+    cap = cv2.VideoCapture(0)  # Accede a la cámara
     sobel_filter = np.array([[1, 0, -1], [2, 0, -2], [1, 0, -1]])
-    gauss_sigma = 1.0   # Parámetro de sigma para el filtro Gaussiano
-    
+    gauss_sigma = 1.0  # Parámetro de sigma para el filtro Gaussiano
+    state = 1  # Estado inicial
+    phase = 1
+
     while True:
         ret, frame = cap.read()
         if not ret:
             print("Error: No se pudo capturar el video.")
             break
-        
-        # Aplica la detección de formas
-        detected_shapes_img = detect_shapes(frame, gauss_sigma, sobel_filter)
-        
-        # Muestra la imagen resultante con las formas detectadas
-        cv2.imshow("Detected Shapes on Black Background", detected_shapes_img)
-        
+
+        if phase==1:
+            if state == 1:
+                if detect_shapes_and_color(frame, gauss_sigma, sobel_filter, "Square", "Yellow"):
+                    print("Square Yellow detected!")
+                    state = 2
+                elif detect_wrong_shape(frame, gauss_sigma, sobel_filter, "Square", "Yellow"):  # Verifica si hay figuras incorrectas
+                    print("Wrong shape detected. Returning to state 1.")
+                    state = 1
+
+            elif state == 2:
+                if detect_shapes_and_color(frame, gauss_sigma, sobel_filter, "Triangle", "Yellow"):
+                    print("Triangle Yellow detected!")
+                    state = 3
+                elif detect_wrong_shape(frame, gauss_sigma, sobel_filter, "Triangle", "Yellow"):
+                    print("Wrong shape detected. Returning to state 1.")
+                    state = 1
+
+            elif state == 3:
+                if detect_shapes_and_color(frame, gauss_sigma, sobel_filter, "Square", "Red"):
+                    print("Square Red detected! First Sequence complete.")
+                    phase =2
+                elif detect_wrong_shape(frame, gauss_sigma, sobel_filter, "Square", "Red"):
+                    print("Wrong shape detected. Returning to state 1.")
+                    state = 1
+
+        if phase==2:
+            if state == 1:
+                if detect_shapes_and_color(frame, gauss_sigma, sobel_filter, "Star", "Green"):
+                    print("Star Green detected!")
+                    state = 2
+                elif detect_wrong_shape(frame, gauss_sigma, sobel_filter, "Star", "Green"):  # Verifica si hay figuras incorrectas
+                    print("Wrong shape detected. Returning to state 1.")
+                    state = 1
+
+            elif state == 2:
+                if detect_shapes_and_color(frame, gauss_sigma, sobel_filter, "Star", "Yellow"):
+                    print("Star Yellow detected!")
+                    state = 3
+                elif detect_wrong_shape(frame, gauss_sigma, sobel_filter, "Star", "Yellow"):
+                    print("Wrong shape detected. Returning to state 1.")
+                    state = 1
+
+            elif state == 3:
+                if detect_shapes_and_color(frame, gauss_sigma, sobel_filter, "Star", "Red"):
+                    print("Star Red detected! Second sequence complete.")
+                    break
+                elif detect_wrong_shape(frame, gauss_sigma, sobel_filter, "Star", "Red"):
+                    print("Wrong shape detected. Returning to state 1.")
+                    state = 1
+
+        # Mostrar el frame procesado
+        cv2.imshow("Shape Detection", frame)
+
         # Salir con la tecla 'q'
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
-    
+
     cap.release()
     cv2.destroyAllWindows()
+
 
 if __name__ == "__main__":
     main()
