@@ -8,12 +8,12 @@ Welcome to our awesome Computer Vision repository! This project is divided into 
 In the first part, we calibrate the camera to obtain both the **intrinsic** and **extrinsic** parameters of the camera. Calibration is crucial for accurate 3D reconstructions and understanding the camera's perspective. 🧐
 
 We gather:
-- **Intrinsic parameters**: These define the internal characteristics of the camera (focal length, principal point, etc.).
+- **Intrinsic parameters**: These define the internal characteristics of the camera.
 - **Extrinsic parameters**: These tell us how the camera is positioned relative to the world.
 
 ## Part 2: Shape Detection 🔍
 
-Next up, we move to detecting **ordered shapes**. We identify various figures in the scene (think circles, squares, and other fun geometric shapes). 🟠🔶 These shapes are crucial to unlock the next phase of the project, where they help us assess the security of a private zone! 🎯
+Next up, we move to detecting **ordered shapes**. We identify various figures in the scene. 🔶 These shapes are crucial to unlock the next phase of the project, where they help us assess the security of a private zone! 🎯
 
 ## Part 3: Red Alert! 🚨🔴
 
