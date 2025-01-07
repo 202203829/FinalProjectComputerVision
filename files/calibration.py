@@ -8,12 +8,12 @@ import os
 from os.path import dirname, join
 
 def load_images(filenames: List) -> List:
-    return [imageio.v2.imread(filename) for filename in filenames]
+    return [cv2.imread(filename) for filename in filenames]
 
 def find_corners(imgs: List) -> List:
     return [cv2.findChessboardCorners(img, (7,7), None) for img in imgs]
 
-def refine_corners(corners: List) -> List:
+def refine_corners(corners: List, imgs: List) -> List:
     corners_copy = copy.deepcopy(corners)
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.01)
     imgs_gray = [cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) for img in imgs]
@@ -45,13 +45,13 @@ def get_chessboard_points(chessboard_shape, dx, dy):
             points.append([x*dx, y*dy, 0])
     return np.array(points, np.float32)
     
-if __name__ == "__main__":
-    imgs_path = [f"..\Visión por ordenador\FinalProject\data\calibration\\foto_{i}.jpg" for i in range(1,15)]
+def main():
+    imgs_path = [f"/home/pi/FinalProjectComputerVision/data/calibration/foto_{i}.jpg" for i in range(1,15)]
     imgs = load_images(imgs_path)
     corners = find_corners(imgs)
-    corners_refined = refine_corners(corners)
+    corners_refined = refine_corners(corners,imgs)
     imgs_copy = copy.deepcopy(imgs)
-    output_dir = "C:\\Users\\pablo\\OneDrive\\Escritorio\\iMat\\iMat 3º\\Visión por ordenador\\FinalProject\\data\\output\\"
+    output_dir = "/home/pi/FinalProjectComputerVision/data/output/"
     draw_show_and_save_corners(imgs_copy, corners, corners_refined, output_dir)
     
     chessboard_points = get_chessboard_points((7, 7), 30, 30)
