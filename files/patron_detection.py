@@ -58,20 +58,38 @@ picam.configure("preview")
 picam.start()
 
 # Variables
-secuencia1 = [ "Cuadrado","Triangulo", "Estrella"]
-secuencia2 = [ "Cuadrado","Triangulo", "Estrella"]
+secuencia1 = ["Cuadrado", "Triangulo", "Estrella"]
+secuencia2 = ["Cuadrado", "Triangulo", "Estrella"]
 
 index = 0
 mensaje = ""
 ultimo_tiempo_mensaje = time.time()
 tiempo_mostrar_mensaje = 2  
 correcto = False
-
+secuencia = 1
 
 while True:
-    frame = picam.capture_array() 
+    frame = picam.capture_array()
+
+    # Si estamos en la secuencia 2, extraemos solo el color rojo
+    if secuencia == 2:
+        # Convertir la imagen a HSV para filtrar el color rojo
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        # Definir el rango de colores rojos en HSV
+        lower_red = np.array([0, 120, 70])
+        upper_red = np.array([10, 255, 255])
+        mask1 = cv2.inRange(hsv, lower_red, upper_red)
+
+        lower_red = np.array([170, 120, 70])
+        upper_red = np.array([180, 255, 255])
+        mask2 = cv2.inRange(hsv, lower_red, upper_red)
+
+        # Combinamos las dos máscaras
+        mask = mask1 | mask2
+        frame = cv2.bitwise_and(frame, frame, mask=mask)
+
     imagen_suavizada = cv2.GaussianBlur(frame, (5, 5), 0)
-    procesado, esquinas = shi_tomasi_corner_detection(frame.copy(), maxCorners=10, qualityLevel=0.3, minDistance=20)
+    procesado, esquinas = shi_tomasi_corner_detection(frame.copy(), maxCorners=10, qualityLevel=0.3, minDistance=20, corner_color=(0, 255, 0), radius=5)
     figura_detectada = clasificar_poligono(esquinas)
 
     # Mostrar mensaje en la pantalla
@@ -81,27 +99,49 @@ while True:
         else:
             cv2.putText(procesado, mensaje, (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
-    secuencia = 1
-    if cv2.waitKey(1) & 0xFF == ord('f'):  # Confirmar figura actual
-        if secuencia == 1
-        if figura_detectada == secuencia1[index]:
-            correcto = True
-            mensaje = f"Figura correcta: {figura_detectada}"
-            index += 1
-            if index == len(secuencia1):
-                mensaje = "Secuencia 1 completada, acceda a Secuencia 2"
-                cv2.putText(procesado, mensaje, (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                cv2.imshow("Deteccion de formas", procesado)
-                cv2.waitKey(3000)
-                break
-        else:
-            correcto = False
-            mensaje = "Figura incorrecta. Reinicia la secuencia."
-            index = 0
-        ultimo_tiempo_mensaje = time.time()
-    elif cv2.waitKey(1) & 0xFF == ord('q'):  # Salir del programa
-        print("Programa terminado.")
-        break
+    if secuencia == 1:
+        if cv2.waitKey(1) & 0xFF == ord('f'):  # Confirmar figura actual
+            if figura_detectada == secuencia1[index]:
+                correcto = True
+                mensaje = f"Figura correcta: {figura_detectada}"
+                index += 1
+                if index == len(secuencia1):
+                    mensaje = "Secuencia 1 completada, acceda a Secuencia 2"
+                    secuencia = 2
+                    cv2.putText(procesado, mensaje, (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                    cv2.imshow("Deteccion de formas", procesado)
+                    cv2.waitKey(3000)
+                    break
+            else:
+                correcto = False
+                mensaje = "Figura incorrecta. Reinicia la secuencia."
+                index = 0
+            ultimo_tiempo_mensaje = time.time()
+        elif cv2.waitKey(1) & 0xFF == ord('q'):
+            print("Programa terminado.")
+            break
+
+    if secuencia == 2:
+        if cv2.waitKey(1) & 0xFF == ord('f'):  # Confirmar figura actual
+            if figura_detectada == secuencia2[index]:
+                correcto = True
+                mensaje = f"Figura correcta: {figura_detectada}"
+                index += 1
+                if index == len(secuencia2):
+                    mensaje = "Acceso concedido"
+                    secuencia = 2
+                    cv2.putText(procesado, mensaje, (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                    cv2.imshow("Deteccion de formas", procesado)
+                    cv2.waitKey(3000)
+                    break
+            else:
+                correcto = False
+                mensaje = "Figura incorrecta. Reinicia la secuencia."
+                index = 0
+            ultimo_tiempo_mensaje = time.time()
+        elif cv2.waitKey(1) & 0xFF == ord('q'):
+            print("Programa terminado.")
+            break
 
     cv2.imshow("Deteccion de formas", procesado)
 
