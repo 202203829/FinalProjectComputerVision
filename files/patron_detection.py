@@ -1,194 +1,109 @@
 import cv2
 import numpy as np
+from picamera2 import Picamera2
+import time
 
-# Variable global para evitar detecciones repetidas
-last_detected = None
+# Funciones de deteccion y análisis de esquinas
+def shi_tomasi_corner_detection(image: np.array, maxCorners: int, qualityLevel: float, minDistance: int, corner_color: tuple, radius: int):
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    corners = cv2.goodFeaturesToTrack(gray, maxCorners, qualityLevel, minDistance)
+    corners = np.intp(corners)
+    corners_list = []
+    for corner in corners:
+        x, y = corner.ravel()
+        corners_list.append([x, y])
+        cv2.circle(image, (x, y), radius, corner_color, -1)
+    return image, corners_list
 
-def is_color_in_range(mean_color, color_range):
-    """Check if a color is within the given HSV range."""
-    lower, upper = color_range
-    return all(lower[i] <= mean_color[i] <= upper[i] for i in range(3))
+def ordenar_puntos(puntos):
+    puntos = np.array(puntos)
+    origen = puntos[np.argmin(puntos[:, 0] + puntos[:, 1])]
+    def calcular_angulo(p):
+        return np.arctan2(p[1] - origen[1], p[0] - origen[0])
+    return sorted(puntos, key=calcular_angulo)
 
-def detect_shapes_and_color(frame, expected_shape, expected_color, color_ranges, min_area=100):
-    """
-    Detect shapes and colors in the frame and verify if they match the expected ones.
-    """
-    global last_detected
+def calcular_angulos(puntos_ordenados):
+    angulos = []
+    n = len(puntos_ordenados)
+    for i in range(n):
+        p1 = puntos_ordenados[i] - puntos_ordenados[i - 1]
+        p2 = puntos_ordenados[(i + 1) % n] - puntos_ordenados[i]
+        cos_theta = np.dot(p1, p2) / (np.linalg.norm(p1) * np.linalg.norm(p2))
+        angulo = np.arccos(np.clip(cos_theta, -1, 1))
+        angulos.append(np.degrees(angulo))
+    return angulos
 
-    hsv_img = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    gray_img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray_img, (5, 5), 0)
-    edges = cv2.Canny(blurred, 50, 150)
-    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+def clasificar_poligono(puntos):
+    puntos_ordenados = ordenar_puntos(puntos)
+    n = len(puntos_ordenados)
+    if n == 3:
+        return "Triangulo"
+    elif n == 4:
+        angulos = calcular_angulos(puntos_ordenados)
+        if all(65 < ang < 105 for ang in angulos):
+            return "Cuadrado"
+        else:
+            return "Otro"
+    elif n == 10:
+        return "Estrella"
+    else:
+        return "Otro"
 
-    for contour in contours:
-        if cv2.contourArea(contour) < min_area:
-            continue
+# Configuracion de la cámara
+picam = Picamera2()
+picam.preview_configuration.main.size = (1280, 720)
+picam.preview_configuration.main.format = "RGB888"
+picam.preview_configuration.align()
+picam.configure("preview")
+picam.start()
 
-        # Compute contour properties
-        perimeter = cv2.arcLength(contour, True)
-        approx = cv2.approxPolyDP(contour, 0.04 * perimeter, True)
-        num_vertices = len(approx)
-        aspect_ratio = calculate_aspect_ratio(contour)
-        shape_area = cv2.contourArea(contour)
+# Variables
+secuencia1 = [ "Cuadrado","Triangulo", "Estrella"]
+secuencia2 = [ "Cuadrado","Triangulo", "Estrella"]
 
-        # Detect shape based on properties
-        detected_shape = None
-        if num_vertices == 3:
-            detected_shape = "Triangle"
-        elif num_vertices == 4:
-            if 0.9 < aspect_ratio < 1.1:  # Square (aspect ratio close to 1)
-                detected_shape = "Square"
-        elif num_vertices ==10:  # Many vertices -> likely a Star
-            detected_shape = "Star"
-
-        # Check color
-        mask = np.zeros_like(gray_img)
-        cv2.drawContours(mask, [contour], 0, 255, -1)
-        mean_color = cv2.mean(hsv_img, mask=mask)[:3]
-
-        if (
-            detected_shape == expected_shape and
-            is_color_in_range(mean_color, color_ranges[expected_color]) and
-            last_detected != (detected_shape, expected_color)
-        ):
-            last_detected = (detected_shape, expected_color)
-            return True
-
-    return False
-
-
-def calculate_aspect_ratio(contour):
-    """
-    Calculate the aspect ratio of a contour's bounding rectangle.
-    """
-    x, y, w, h = cv2.boundingRect(contour)
-    return float(w) / h if h != 0 else 0
-
-
-def detect_wrong_shape(frame, expected_shape, expected_color, color_ranges, min_area=100):
-    """
-    Detect if there is a wrong shape or color in the frame and print detailed error messages.
-    """
-    global last_detected
-
-    hsv_img = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    gray_img = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray_img, (5, 5), 0)
-    edges = cv2.Canny(blurred, 50, 150)
-    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    for contour in contours:
-        if cv2.contourArea(contour) < min_area:
-            continue
-
-        epsilon = 0.02 * cv2.arcLength(contour, True)
-        approx = cv2.approxPolyDP(contour, epsilon, True)
-        num_vertices = len(approx)
-
-        mask = np.zeros_like(gray_img)
-        cv2.drawContours(mask, [contour], 0, 255, -1)
-        mean_color = cv2.mean(hsv_img, mask=mask)[:3]
-
-        detected_shape = None
-        if num_vertices == 3:
-            detected_shape = "Triangle"
-        elif num_vertices == 4:
-            detected_shape = "Square"
-        elif num_vertices > 8:
-            detected_shape = "Star"
-
-        if (
-            detected_shape and
-            last_detected != (detected_shape, expected_color)
-        ):
-            if detected_shape != expected_shape:
-                print(f"Detected wrong shape: {detected_shape} instead of {expected_shape}.")
-                last_detected = (detected_shape, expected_color)
-                return True
-            elif not is_color_in_range(mean_color, color_ranges[expected_color]):
-                print(f"Detected wrong color: {mean_color} instead of {expected_color}.")
-                last_detected = (detected_shape, expected_color)
-                return True
-
-    return False
-
-def main():
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        print("Error: No se pudo abrir la cámara.")
-        return
-
-    state = 1
-    phase = 1
-    color_ranges = {
-        "red": [(0, 100, 100), (10, 255, 255)],
-        "green": [(35, 100, 100), (85, 255, 255)],
-        "yellow": [(0, 0, 100), (100, 55, 255)],
-    }
-
-    print("Correct Sequence 1 is Yellow Square, Green Triangle, Red Square")
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            print("Error: No se pudo capturar el video.")
-            break
-
-        if phase == 1:
-            if state == 1:
-                if detect_shapes_and_color(frame, "Square", "yellow", color_ranges):
-                    print("Square Yellow detected!")
-                    state = 2
-                elif detect_wrong_shape(frame, "Square", "yellow", color_ranges):
-                    state = 1
-
-            elif state == 2:
-                if detect_shapes_and_color(frame, "Triangle", "green", color_ranges):
-                    print("Triangle Green detected!")
-                    state = 3
-                elif detect_wrong_shape(frame, "Triangle", "green", color_ranges):
-                    state = 1
-
-            elif state == 3:
-                if detect_shapes_and_color(frame, "Square", "red", color_ranges):
-                    print("Square Red detected! First Sequence complete.")
-                    phase = 2
-                    state = 1
-                    print("Correct Sequence 2 is Green Star, Yellow Star, Red Star")
-                elif detect_wrong_shape(frame, "Square", "red", color_ranges):
-                    state = 1
-
-        elif phase == 2:
-            if state == 1:
-                if detect_shapes_and_color(frame, "Star", "green", color_ranges):
-                    print("Star Green detected!")
-                    state = 2
-                elif detect_wrong_shape(frame, "Star", "green", color_ranges):
-                    state = 1
-
-            elif state == 2:
-                if detect_shapes_and_color(frame, "Star", "yellow", color_ranges):
-                    print("Star Yellow detected!")
-                    state = 3
-                elif detect_wrong_shape(frame, "Star", "yellow", color_ranges):
-                    state = 1
-
-            elif state == 3:
-                if detect_shapes_and_color(frame, "Star", "red", color_ranges):
-                    print("Star Red detected! Second Sequence complete.")
-                    break
-                elif detect_wrong_shape(frame, "Star", "red", color_ranges):
-                    state = 1
-
-        cv2.imshow("Shape Detection", frame)
-
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-
-    cap.release()
-    cv2.destroyAllWindows()
+index = 0
+mensaje = ""
+ultimo_tiempo_mensaje = time.time()
+tiempo_mostrar_mensaje = 2  
+correcto = False
 
 
-if __name__ == "__main__":
-    main()
+while True:
+    frame = picam.capture_array() 
+    imagen_suavizada = cv2.GaussianBlur(frame, (5, 5), 0)
+    procesado, esquinas = shi_tomasi_corner_detection(frame.copy(), maxCorners=10, qualityLevel=0.3, minDistance=20)
+    figura_detectada = clasificar_poligono(esquinas)
+
+    # Mostrar mensaje en la pantalla
+    if mensaje and time.time() - ultimo_tiempo_mensaje < tiempo_mostrar_mensaje:
+        if correcto:
+            cv2.putText(procesado, mensaje, (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        else:
+            cv2.putText(procesado, mensaje, (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+
+    secuencia = 1
+    if cv2.waitKey(1) & 0xFF == ord('f'):  # Confirmar figura actual
+        if secuencia == 1
+        if figura_detectada == secuencia1[index]:
+            correcto = True
+            mensaje = f"Figura correcta: {figura_detectada}"
+            index += 1
+            if index == len(secuencia1):
+                mensaje = "Secuencia 1 completada, acceda a Secuencia 2"
+                cv2.putText(procesado, mensaje, (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                cv2.imshow("Deteccion de formas", procesado)
+                cv2.waitKey(3000)
+                break
+        else:
+            correcto = False
+            mensaje = "Figura incorrecta. Reinicia la secuencia."
+            index = 0
+        ultimo_tiempo_mensaje = time.time()
+    elif cv2.waitKey(1) & 0xFF == ord('q'):  # Salir del programa
+        print("Programa terminado.")
+        break
+
+    cv2.imshow("Deteccion de formas", procesado)
+
+cv2.destroyAllWindows()
+picam.stop()
